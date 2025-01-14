@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import * as d3 from 'd3';
+import React from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, ScatterPlot, Scatter } from 'recharts';
 import { AnalysisResult } from '../types';
 import { Download } from 'lucide-react';
 
@@ -8,63 +8,6 @@ interface AnalysisPanelProps {
 }
 
 export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ results }) => {
-  const chartRefs = useRef<(HTMLDivElement | null)[]>([]);
-
-  const renderBarChart = (data: any[], container: HTMLElement) => {
-    const margin = { top: 20, right: 30, bottom: 50, left: 40 };
-    const width = container.offsetWidth - margin.left - margin.right;
-    const height = 240 - margin.top - margin.bottom;
-
-    d3.select(container).select('svg').remove();
-
-    const svg = d3
-      .select(container)
-      .append('svg')
-      .attr('width', width + margin.left + margin.right)
-      .attr('height', height + margin.top + margin.bottom)
-      .append('g')
-      .attr('transform', `translate(${margin.left},${margin.top})`);
-
-    const x = d3
-      .scaleBand()
-      .domain(data.map((d) => d.bin))
-      .range([0, width])
-      .padding(0.1);
-
-    const y = d3
-      .scaleLinear()
-      .domain([0, d3.max(data, (d) => d.count) || 0])
-      .nice()
-      .range([height, 0]);
-
-    svg
-      .append('g')
-      .selectAll('rect')
-      .data(data)
-      .enter()
-      .append('rect')
-      .attr('x', (d) => x(d.bin)!)
-      .attr('y', (d) => y(d.count))
-      .attr('width', x.bandwidth())
-      .attr('height', (d) => height - y(d.count))
-      .attr('fill', '#60A5FA');
-
-    svg
-      .append('g')
-      .attr('transform', `translate(0,${height})`)
-      .call(d3.axisBottom(x).tickSizeOuter(0));
-
-    svg.append('g').call(d3.axisLeft(y));
-  };
-
-  useEffect(() => {
-    results.forEach((result, index) => {
-      if (chartRefs.current[index]) {
-        renderBarChart(result.histogram, chartRefs.current[index]!);
-      }
-    });
-  }, [results]);
-
   const exportAnalysis = () => {
     const analysisText = results.map(result => {
       const basic = `Column: ${result.columnName}
@@ -106,13 +49,13 @@ Mode: ${result.mode}` : '';
           Export Analysis
         </button>
       </div>
-
-      {results.map((result, index) => (
+      
+      {results.map((result) => (
         <div key={result.columnName} className="bg-white p-6 rounded-lg shadow">
           <h3 className="text-lg font-medium text-gray-900 mb-4">
             {result.columnName}
           </h3>
-
+          
           {result.type === 'numeric' ? (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -132,14 +75,38 @@ Mode: ${result.mode}` : '';
                   <p className="text-sm text-gray-500">Count</p>
                   <p className="text-lg font-semibold">{result.count}</p>
                 </div>
+                <div className="bg-gray-50 p-4 rounded">
+                  <p className="text-sm text-gray-500">Min</p>
+                  <p className="text-lg font-semibold">{result.min?.toFixed(2)}</p>
+                </div>
+                <div className="bg-gray-50 p-4 rounded">
+                  <p className="text-sm text-gray-500">Max</p>
+                  <p className="text-lg font-semibold">{result.max?.toFixed(2)}</p>
+                </div>
+                <div className="bg-gray-50 p-4 rounded">
+                  <p className="text-sm text-gray-500">Q1</p>
+                  <p className="text-lg font-semibold">{result.quartiles?.q1.toFixed(2)}</p>
+                </div>
+                <div className="bg-gray-50 p-4 rounded">
+                  <p className="text-sm text-gray-500">Q3</p>
+                  <p className="text-lg font-semibold">{result.quartiles?.q3.toFixed(2)}</p>
+                </div>
               </div>
-              <div
-                ref={(el) => (chartRefs.current[index] = el)}
-                className="h-64"
-              />
+              <div className="h-64">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Distribution</h4>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={result.histogram}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="bin" angle={-45} textAnchor="end" height={70} />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#60A5FA" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </>
           ) : (
-            <>
+            <div>
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="bg-gray-50 p-4 rounded">
                   <p className="text-sm text-gray-500">Mode</p>
@@ -150,11 +117,19 @@ Mode: ${result.mode}` : '';
                   <p className="text-lg font-semibold">{result.count}</p>
                 </div>
               </div>
-              <div
-                ref={(el) => (chartRefs.current[index] = el)}
-                className="h-64"
-              />
-            </>
+              <div className="h-64">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Value Distribution</h4>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={result.histogram}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="bin" angle={-45} textAnchor="end" height={70} />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#60A5FA" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
           )}
         </div>
       ))}

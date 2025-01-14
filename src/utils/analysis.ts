@@ -18,7 +18,6 @@ const calculateStandardDeviation = (numbers: number[], mean: number) => {
 };
 
 const createHistogram = (values: (string | number | null | undefined)[], bins = 10) => {
-  // Filter out null/undefined values
   const cleanValues = values.filter((v): v is string | number => v != null);
   
   if (cleanValues.length === 0) {
@@ -119,7 +118,6 @@ export const filterData = (data: DataRow[], filters: Filter[]): DataRow[] => {
       const value = row[filter.column];
       const filterValue = filter.value;
       
-      // Handle null/undefined values
       if (value == null) return false;
       
       switch (filter.operator) {
@@ -147,7 +145,6 @@ export const sortData = (data: DataRow[], sort?: Sort): DataRow[] => {
     const aVal = a[sort.column];
     const bVal = b[sort.column];
     
-    // Handle null/undefined values in sorting
     if (aVal == null) return 1;
     if (bVal == null) return -1;
     if (aVal == null && bVal == null) return 0;

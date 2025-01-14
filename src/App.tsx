@@ -3,37 +3,49 @@ import { FileUpload } from './components/FileUpload';
 import { DataTable } from './components/DataTable';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { DataEditor } from './components/DataEditor';
-import { CodeEditor } from './components/CodeEditor';
 import { Visualizations } from './components/Visualizations';
 import { Notebook } from './components/Notebook';
+import { SqlFileManager } from './components/SqlFileManager';
 import { DataRow, AnalysisResult } from './types';
 import { analyzeColumn } from './utils/analysis';
 import { parse } from 'papaparse';
-import { LayoutDashboard, Table, BarChart, Edit3, Code, LineChart, Download, Share2, BookOpen } from 'lucide-react';
+import { LayoutDashboard, Table, BarChart, Edit3, LineChart, Download, Share2, BookOpen, Database, Play } from 'lucide-react';
 import initSqlJs from 'sql.js-httpvfs';
 
-declare global {
-  interface Window {
-    data: DataRow[];
-    sqlOutput: string;
-    pythonOutput: string;
-    jsOutput: string;
-  }
+interface SqlFile {
+  id: string;
+  name: string;
+  content: string;
 }
+
+interface SqliteDb {
+  name: string;
+  db: any; 
+}
+
+const initializeSqlJs = async () => {
+  try {
+    const SQL = await initSqlJs({
+      locateFile: file => `https://sql.js.org/dist/${file}` 
+    });
+    return SQL;
+  } catch (error) {
+    console.error('Error initializing SQL.js:', error);
+    throw error;
+  }
+};
 
 function App() {
   const [data, setData] = useState<DataRow[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
   const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>([]);
-  const [activeTab, setActiveTab] = useState<'data' | 'analysis' | 'edit' | 'code' | 'visualize' | 'notebook'>('data');
-  const [sqlQuery, setSqlQuery] = useState("SELECT * FROM data LIMIT 10;");
-  const [pythonCode, setPythonCode] = useState(`import pandas as pd\nimport numpy as np\n\n# Your data is available as 'df'\n`);
-  const [jsCode, setJsCode] = useState(`// Your data is available as 'data'\n`);
-  const [codeOutput, setCodeOutput] = useState<{sql: string; python: string; js: string}>({
-    sql: '',
-    python: '',
-    js: ''
-  });
+  const [activeTab, setActiveTab] = useState<'data' | 'analysis' | 'edit' | 'sql' | 'visualize' | 'notebook'>('data');
+  const [sqlQuery, setSqlQuery] = useState("SELECT * FROM sqlite_master WHERE type='table';");
+  const [sqlOutput, setSqlOutput] = useState('');
+  const [sqlFiles, setSqlFiles] = useState<SqlFile[]>([]);
+  const [sqliteDb, setSqliteDb] = useState<SqliteDb | null>(null);
+  const [isExecutingSql, setIsExecutingSql] = useState(false);
+  const [SQL, setSQL] = useState<any>(null); 
 
   const handleFileUpload = useCallback((file: File) => {
     parse(file, {
@@ -41,7 +53,6 @@ function App() {
       complete: (results) => {
         const parsedData = results.data as DataRow[];
         setData(parsedData);
-        window.data = parsedData;
         if (parsedData.length > 0) {
           setColumns(Object.keys(parsedData[0]));
           const analysis = Object.keys(parsedData[0]).map(column =>
@@ -53,76 +64,88 @@ function App() {
     });
   }, []);
 
-  const executeSQL = async () => {
+  const handleSqlFileUpload = async (file: File) => {
+    const content = await file.text();
+    const newFile: SqlFile = {
+      id: Date.now().toString(),
+      name: file.name,
+      content
+    };
+    setSqlFiles(prev => [...prev, newFile]);
+  };
+
+  const handleSqliteFileUpload = async (file: File) => {
     try {
-      const SQL = await initSqlJs({
-        locateFile: (file: any) => `https://sql.js.org/dist/${file}`
-      });
+      if (!SQL) {
+        const initializedSQL = await initializeSqlJs();
+        setSQL(initializedSQL);
+      }
+      const buffer = await file.arrayBuffer();
+      const db = new SQL.Database(new Uint8Array(buffer));
       
-      const db = new SQL.Database();
-      
-      // Create table and insert data
-      const createTable = `CREATE TABLE data (${columns.map((col: any) => `${col} TEXT`).join(', ')});`;
-      db.run(createTable);
-      
-      const insertData = data.map(row => {
-        const values = columns.map((col: string | number) => {
-          const val = row[col];
-          return typeof val === 'string' ? `'${val.replace(/'/g, "''")}'` : val;
+      setSqliteDb({ name: file.name, db });
+      setActiveTab('sql');
+      executeSQL();
+    } catch (error) {
+      alert('Error loading SQLite database: ' + error.message);
+    }
+  };
+
+  const handleSqlFileDelete = (id: string) => {
+    setSqlFiles(prev => prev.filter(file => file.id !== id));
+  };
+
+  const handleSqlFileExecute = (content: string) => {
+    setSqlQuery(content);
+    executeSQL();
+  };
+
+  const executeSQL = async () => {
+    setIsExecutingSql(true);
+    try {
+      const db = sqliteDb?.db || new SQL.Database();
+      if (!sqliteDb) {
+        // Create table and insert data if db is not from a file
+        const createTable = `CREATE TABLE data (${columns.map(col => `${col} TEXT`).join(', ')});`;
+        db.run(createTable);
+
+        data.forEach(row => {
+          const values = columns.map(col => `'${row[col]?.toString().replace(/'/g, "''")}'`);
+          db.run(`INSERT INTO data VALUES (${values.join(', ')});`);
         });
-        return `INSERT INTO data VALUES (${values.join(', ')});`;
-      });
-      
-      insertData.forEach(query => db.run(query));
-      
-      // Execute user query
-      const result = db.exec(sqlQuery);
-      
-      if (result.length === 0) {
-        setCodeOutput(prev => ({...prev, sql: 'Query executed successfully (no results)'}));
+      }
+
+      const results = db.exec(sqlQuery);
+      if (results.length === 0) {
+        setSqlOutput('Query executed successfully (no results)');
         return;
       }
       
-      const columns = result[0].columns;
-      const values = result[0].values;
+      const fetchedColumns = results[0].columns;
+      const values = results[0].values;
+      
+      const parsedData = values.map(row => {
+        const rowData: DataRow = {};
+        fetchedColumns.forEach((col, index) => {
+          rowData[col] = row[index];
+        });
+        return rowData;
+      });
+      
+      setData(parsedData);
+      setColumns(fetchedColumns);
+      
       const output = [
-        columns.join('\t'),
-        ...values.map((row: any[]) => row.join('\t'))
+        fetchedColumns.join('\t'),
+        ...values.map(row => row.join('\t'))
       ].join('\n');
       
-      setCodeOutput(prev => ({...prev, sql: output}));
+      setSqlOutput(output);
     } catch (error) {
-      setCodeOutput(prev => ({...prev, sql: `Error: ${error.message}`}));
+      setSqlOutput(`Error: ${error.message}`);
+    } finally {
+      setIsExecutingSql(false);
     }
-  };
-
-  const executeJavaScript = () => {
-    try {
-      const logs: string[] = [];
-      const originalConsoleLog = console.log;
-      console.log = (...args) => {
-        logs.push(args.map(arg => 
-          typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
-        ).join(' '));
-      };
-
-      const result = new Function('data', jsCode)(data);
-      console.log = originalConsoleLog;
-
-      setCodeOutput(prev => ({
-        ...prev, 
-        js: logs.join('\n') + (result !== undefined ? '\n' + String(result) : '')
-      }));
-    } catch (error) {
-      setCodeOutput(prev => ({...prev, js: `Error: ${error.message}`}));
-    }
-  };
-
-  const executePython = () => {
-    setCodeOutput(prev => ({
-      ...prev,
-      python: 'Python execution is not available in the browser environment. Consider using the JavaScript editor instead.'
-    }));
   };
 
   const handleDataSave = (newData: DataRow[]) => {
@@ -205,9 +228,13 @@ function App() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {data.length === 0 ? (
+        {data.length === 0 && !sqliteDb ? (
           <div className="max-w-xl mx-auto">
-            <FileUpload onFileUpload={handleFileUpload} />
+            <FileUpload 
+              onFileUpload={handleFileUpload}
+              onSqlFileUpload={handleSqlFileUpload}
+              onSqliteFileUpload={handleSqliteFileUpload}
+            />
           </div>
         ) : (
           <div className="space-y-6">
@@ -243,11 +270,11 @@ function App() {
                     Edit Data
                   </button>
                   <button
-                    onClick={() => setActiveTab('code')}
-                    className={getTabClassName('code')}
+                    onClick={() => setActiveTab('sql')}
+                    className={getTabClassName('sql')}
                   >
-                    <Code className="h-5 w-5 mr-2" />
-                    Code
+                    <Database className="h-5 w-5 mr-2" />
+                    SQL
                   </button>
                   <button
                     onClick={() => setActiveTab('notebook')}
@@ -259,7 +286,7 @@ function App() {
                 </nav>
               </div>
               <div className="p-6">
-                {activeTab === 'data' && (
+                {activeTab === 'data' && data.length > 0 && (
                   <DataTable data={data} columns={columns} />
                 )}
                 {activeTab === 'analysis' && (
@@ -275,44 +302,41 @@ function App() {
                     onSave={handleDataSave}
                   />
                 )}
-                {activeTab === 'code' && (
+                {activeTab === 'sql' && (
                   <div className="space-y-6">
-                    <div>
-                      <CodeEditor
-                        language="sql"
+                    {sqliteDb && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                        <h3 className="text-blue-800 font-medium">
+                          Working with SQLite database: {sqliteDb.name}
+                        </h3>
+                      </div>
+                    )}
+                    <SqlFileManager
+                      files={sqlFiles}
+                      onExecute={handleSqlFileExecute}
+                      onDelete={handleSqlFileDelete}
+                    />
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-medium text-gray-900">SQL Query</h3>
+                        <button
+                          onClick={executeSQL}
+                          disabled={isExecutingSql}
+                          className="flex items-center px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
+                        >
+                          <Play className="h-4 w-4 mr-2" />
+                          Run Query
+                        </button>
+                      </div>
+                      <textarea
                         value={sqlQuery}
-                        onChange={setSqlQuery}
-                        onRun={executeSQL}
+                        onChange={(e) => setSqlQuery(e.target.value)}
+                        className="w-full h-40 font-mono text-sm p-4 border rounded-lg"
+                        placeholder="Enter your SQL query here..."
                       />
-                      {codeOutput.sql && (
-                        <div className="mt-2 p-4 bg-gray-50 rounded border">
-                          <pre className="whitespace-pre-wrap">{codeOutput.sql}</pre>
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <CodeEditor
-                        language="python"
-                        value={pythonCode}
-                        onChange={setPythonCode}
-                        onRun={executePython}
-                      />
-                      {codeOutput.python && (
-                        <div className="mt-2 p-4 bg-gray-50 rounded border">
-                          <pre className="whitespace-pre-wrap">{codeOutput.python}</pre>
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <CodeEditor
-                        language="javascript"
-                        value={jsCode}
-                        onChange={setJsCode}
-                        onRun={executeJavaScript}
-                      />
-                      {codeOutput.js && (
-                        <div className="mt-2 p-4 bg-gray-50 rounded border">
-                          <pre className="whitespace-pre-wrap">{codeOutput.js}</pre>
+                      {sqlOutput && (
+                        <div className="mt-4 p-4 bg-gray-50 rounded-lg border overflow-x-auto">
+                          <pre className="whitespace-pre-wrap font-mono text-sm">{sqlOutput}</pre>
                         </div>
                       )}
                     </div>

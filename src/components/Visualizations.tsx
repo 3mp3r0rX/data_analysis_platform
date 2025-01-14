@@ -35,7 +35,6 @@ export const Visualizations: React.FC<VisualizationsProps> = ({ data, columns })
   const [yAxis, setYAxis] = useState(columns[1] || columns[0]);
   const [groupBy, setGroupBy] = useState<string>('');
 
-  // Memoize data processing
   const processedData = useMemo(() => {
     // Sample data if it's too large
     const sampledData = data.length > MAX_DATA_POINTS
@@ -53,7 +52,7 @@ export const Visualizations: React.FC<VisualizationsProps> = ({ data, columns })
       return Object.entries(groupedData)
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value)
-        .slice(0, 20); // Limit to top 20 groups
+        .slice(0, 20); 
     }
 
     return sampledData.map(row => ({
@@ -62,7 +61,7 @@ export const Visualizations: React.FC<VisualizationsProps> = ({ data, columns })
     }));
   }, [data, xAxis, yAxis, groupBy]);
 
-  // Memoize chart rendering
+
   const renderChart = useCallback(() => {
     const commonProps = {
       width: "100%",
