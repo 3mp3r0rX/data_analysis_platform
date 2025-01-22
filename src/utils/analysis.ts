@@ -1,4 +1,4 @@
-import { DataRow, AnalysisResult } from '../types';
+import { DataRow, AnalysisResult, Filter, Sort } from '../types';
 
 const calculateQuartiles = (numbers: number[]) => {
   const sorted = [...numbers].sort((a, b) => a - b);
@@ -18,18 +18,36 @@ const calculateStandardDeviation = (numbers: number[], mean: number) => {
 };
 
 const createHistogram = (values: (string | number | null | undefined)[], bins = 10) => {
-  const cleanValues = values.filter((v): v is string | number => v != null);
+  if (!Array.isArray(values) || values.length === 0) {
+    return [{ bin: 'No Data', count: 0 }];
+  }
+
+  // Filter out null/undefined values and convert to strings/numbers
+  const cleanValues = values.filter((v): v is string | number => 
+    v !== null && v !== undefined && v !== ''
+  );
   
   if (cleanValues.length === 0) {
     return [{ bin: 'No Data', count: 0 }];
   }
 
-  if (typeof cleanValues[0] === 'number' || !isNaN(Number(cleanValues[0]))) {
+  // Check if values can be treated as numbers
+  const allNumbers = cleanValues.every(v => !isNaN(Number(v)));
+
+  if (allNumbers) {
     const numbers = cleanValues.map(v => Number(v));
     const min = Math.min(...numbers);
     const max = Math.max(...numbers);
-    const binSize = (max - min) / bins;
     
+    // Handle case where all values are the same
+    if (min === max) {
+      return [{
+        bin: min.toFixed(2),
+        count: numbers.length
+      }];
+    }
+    
+    const binSize = (max - min) / bins;
     const histogram = Array(bins).fill(0).map((_, i) => ({
       bin: `${(min + i * binSize).toFixed(2)} - ${(min + (i + 1) * binSize).toFixed(2)}`,
       count: 0
@@ -42,11 +60,13 @@ const createHistogram = (values: (string | number | null | undefined)[], bins = 
     
     return histogram;
   } else {
+    // Handle categorical data
     const counts: { [key: string]: number } = {};
     cleanValues.forEach(val => {
       const key = String(val);
       counts[key] = (counts[key] || 0) + 1;
     });
+    
     return Object.entries(counts)
       .map(([bin, count]) => ({ bin, count }))
       .sort((a, b) => b.count - a.count)
@@ -55,8 +75,20 @@ const createHistogram = (values: (string | number | null | undefined)[], bins = 
 };
 
 export const analyzeColumn = (data: DataRow[], columnName: string): AnalysisResult => {
+  if (!data || !Array.isArray(data) || data.length === 0) {
+    return {
+      columnName,
+      type: 'categorical',
+      count: 0,
+      mode: 'No Data',
+      histogram: [{ bin: 'No Data', count: 0 }]
+    };
+  }
+
   const values = data.map(row => row[columnName]);
-  const cleanValues = values.filter(val => val != null);
+  const cleanValues = values.filter(val => 
+    val !== null && val !== undefined && val !== ''
+  );
   
   if (cleanValues.length === 0) {
     return {
@@ -99,7 +131,7 @@ export const analyzeColumn = (data: DataRow[], columnName: string): AnalysisResu
 };
 
 const getMostFrequent = (arr: (string | number)[]): string | number => {
-  if (arr.length === 0) return 'No Data';
+  if (!Array.isArray(arr) || arr.length === 0) return 'No Data';
   
   const counts = arr.reduce((acc: { [key: string]: number }, val) => {
     const key = String(val);
@@ -113,11 +145,14 @@ const getMostFrequent = (arr: (string | number)[]): string | number => {
 };
 
 export const filterData = (data: DataRow[], filters: Filter[]): DataRow[] => {
+  if (!Array.isArray(data)) return [];
+  
   return data.filter(row => {
     return filters.every(filter => {
       const value = row[filter.column];
       const filterValue = filter.value;
       
+      // Handle null/undefined values
       if (value == null) return false;
       
       switch (filter.operator) {
@@ -139,12 +174,14 @@ export const filterData = (data: DataRow[], filters: Filter[]): DataRow[] => {
 };
 
 export const sortData = (data: DataRow[], sort?: Sort): DataRow[] => {
+  if (!Array.isArray(data)) return [];
   if (!sort) return data;
   
   return [...data].sort((a, b) => {
     const aVal = a[sort.column];
     const bVal = b[sort.column];
     
+    // Handle null/undefined values in sorting
     if (aVal == null) return 1;
     if (bVal == null) return -1;
     if (aVal == null && bVal == null) return 0;

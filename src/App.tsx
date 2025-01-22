@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { DataTable } from './components/DataTable';
 import { AnalysisPanel } from './components/AnalysisPanel';
@@ -6,10 +6,12 @@ import { DataEditor } from './components/DataEditor';
 import { Visualizations } from './components/Visualizations';
 import { Notebook } from './components/Notebook';
 import { SqlFileManager } from './components/SqlFileManager';
+import { DataCuration } from './components/DataCuration';
+import { Dashboard } from './components/Dashboard';
 import { DataRow, AnalysisResult } from './types';
 import { analyzeColumn } from './utils/analysis';
 import { parse } from 'papaparse';
-import { LayoutDashboard, Table, BarChart, Edit3, LineChart, Download, Share2, BookOpen, Database, Play } from 'lucide-react';
+import { LayoutDashboard, Table, BarChart, Edit3, LineChart, Download, Share2, BookOpen, Database, Play, Wand2 } from 'lucide-react';
 import initSqlJs from 'sql.js-httpvfs';
 
 interface SqlFile {
@@ -20,13 +22,13 @@ interface SqlFile {
 
 interface SqliteDb {
   name: string;
-  db: any; 
+  db: any;
 }
 
 const initializeSqlJs = async () => {
   try {
     const SQL = await initSqlJs({
-      locateFile: file => `https://sql.js.org/dist/${file}` 
+      locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
     });
     return SQL;
   } catch (error) {
@@ -35,166 +37,159 @@ const initializeSqlJs = async () => {
   }
 };
 
-function App() {
+export default function App() {
   const [data, setData] = useState<DataRow[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
   const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>([]);
-  const [activeTab, setActiveTab] = useState<'data' | 'analysis' | 'edit' | 'sql' | 'visualize' | 'notebook'>('data');
+  const [activeTab, setActiveTab] = useState<'data' | 'analysis' | 'edit' | 'sql' | 'visualize' | 'notebook' | 'curate' | 'dashboard'>('data');
   const [sqlQuery, setSqlQuery] = useState("SELECT * FROM sqlite_master WHERE type='table';");
   const [sqlOutput, setSqlOutput] = useState('');
   const [sqlFiles, setSqlFiles] = useState<SqlFile[]>([]);
   const [sqliteDb, setSqliteDb] = useState<SqliteDb | null>(null);
   const [isExecutingSql, setIsExecutingSql] = useState(false);
-  const [SQL, setSQL] = useState<any>(null); 
 
   const handleFileUpload = useCallback((file: File) => {
     parse(file, {
       header: true,
+      dynamicTyping: true,
       complete: (results) => {
         const parsedData = results.data as DataRow[];
-        setData(parsedData);
         if (parsedData.length > 0) {
+          setData(parsedData);
           setColumns(Object.keys(parsedData[0]));
-          const analysis = Object.keys(parsedData[0]).map(column =>
+          // Analyze each column
+          const analysis = Object.keys(parsedData[0]).map(column => 
             analyzeColumn(parsedData, column)
           );
           setAnalysisResults(analysis);
         }
       },
+      error: (error) => {
+        console.error('Error parsing CSV:', error);
+        alert('Error parsing the CSV file. Please check the file format.');
+      }
     });
   }, []);
 
-  const handleSqlFileUpload = async (file: File) => {
-    const content = await file.text();
-    const newFile: SqlFile = {
-      id: Date.now().toString(),
-      name: file.name,
-      content
+  const handleSqlFileUpload = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      setSqlFiles(prev => [...prev, {
+        id: Date.now().toString(),
+        name: file.name,
+        content
+      }]);
     };
-    setSqlFiles(prev => [...prev, newFile]);
-  };
+    reader.readAsText(file);
+  }, []);
 
-  const handleSqliteFileUpload = async (file: File) => {
+  const handleSqliteFileUpload = useCallback(async (file: File) => {
     try {
-      if (!SQL) {
-        const initializedSQL = await initializeSqlJs();
-        setSQL(initializedSQL);
-      }
+      const SQL = await initializeSqlJs();
       const buffer = await file.arrayBuffer();
       const db = new SQL.Database(new Uint8Array(buffer));
-      
       setSqliteDb({ name: file.name, db });
-      setActiveTab('sql');
-      executeSQL();
     } catch (error) {
-      alert('Error loading SQLite database: ' + error.message);
+      console.error('Error loading SQLite database:', error);
+      alert('Error loading the SQLite database. Please check the file format.');
     }
-  };
+  }, []);
 
-  const handleSqlFileDelete = (id: string) => {
-    setSqlFiles(prev => prev.filter(file => file.id !== id));
-  };
+  const handleDataSave = useCallback((newData: DataRow[]) => {
+    setData(newData);
+    // Re-analyze data after changes
+    if (newData.length > 0) {
+      const analysis = Object.keys(newData[0]).map(column => 
+        analyzeColumn(newData, column)
+      );
+      setAnalysisResults(analysis);
+    }
+  }, []);
 
-  const handleSqlFileExecute = (content: string) => {
+  const handleSqlFileExecute = useCallback((content: string) => {
     setSqlQuery(content);
     executeSQL();
-  };
+  }, []);
 
-  const executeSQL = async () => {
+  const handleSqlFileDelete = useCallback((id: string) => {
+    setSqlFiles(prev => prev.filter(file => file.id !== id));
+  }, []);
+
+  const executeSQL = useCallback(async () => {
+    if (!sqliteDb?.db) {
+      alert('Please load a SQLite database first.');
+      return;
+    }
+
     setIsExecutingSql(true);
     try {
-      const db = sqliteDb?.db || new SQL.Database();
-      if (!sqliteDb) {
-        // Create table and insert data if db is not from a file
-        const createTable = `CREATE TABLE data (${columns.map(col => `${col} TEXT`).join(', ')});`;
-        db.run(createTable);
-
-        data.forEach(row => {
-          const values = columns.map(col => `'${row[col]?.toString().replace(/'/g, "''")}'`);
-          db.run(`INSERT INTO data VALUES (${values.join(', ')});`);
-        });
-      }
-
-      const results = db.exec(sqlQuery);
-      if (results.length === 0) {
-        setSqlOutput('Query executed successfully (no results)');
-        return;
-      }
-      
-      const fetchedColumns = results[0].columns;
-      const values = results[0].values;
-      
-      const parsedData = values.map(row => {
-        const rowData: DataRow = {};
-        fetchedColumns.forEach((col, index) => {
-          rowData[col] = row[index];
-        });
-        return rowData;
-      });
-      
-      setData(parsedData);
-      setColumns(fetchedColumns);
-      
-      const output = [
-        fetchedColumns.join('\t'),
-        ...values.map(row => row.join('\t'))
-      ].join('\n');
-      
-      setSqlOutput(output);
+      const results = sqliteDb.db.exec(sqlQuery);
+      setSqlOutput(JSON.stringify(results, null, 2));
     } catch (error) {
+      console.error('SQL execution error:', error);
       setSqlOutput(`Error: ${error.message}`);
     } finally {
       setIsExecutingSql(false);
     }
-  };
+  }, [sqlQuery, sqliteDb]);
 
-  const handleDataSave = (newData: DataRow[]) => {
-    setData(newData);
-    const analysis = columns.map(column => analyzeColumn(newData, column));
-    setAnalysisResults(analysis);
-  };
-
-  const handleExportData = () => {
-    const csvContent = [
-      columns.join(','),
-      ...data.map(row => columns.map(col => `"${row[col]}"`).join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
+  const handleExportData = useCallback(() => {
+    const headers = columns.join(',');
+    const rows = data.map(row => 
+      columns.map(col => `"${row[col]}"`).join(',')
+    ).join('\n');
+    const csv = `${headers}\n${rows}`;
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'analyzed_data.csv';
+    a.download = 'exported_data.csv';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
+    window.URL.revokeObjectURL(url);
+  }, [data, columns]);
 
-  const handleShareAnalysis = () => {
-    const analysisReport = {
-      data: data.slice(0, 100),
-      analysis: analysisResults,
-      timestamp: new Date().toISOString()
-    };
+  const handleShareAnalysis = useCallback(() => {
+    const analysisText = analysisResults.map(result => {
+      const basic = `Column: ${result.columnName}
+Type: ${result.type}
+Count: ${result.count}`;
+      
+      const numeric = result.type === 'numeric' ? `
+Mean: ${result.mean?.toFixed(2)}
+Median: ${result.median?.toFixed(2)}
+Min: ${result.min?.toFixed(2)}
+Max: ${result.max?.toFixed(2)}
+Standard Deviation: ${result.standardDeviation?.toFixed(2)}
+Q1: ${result.quartiles?.q1.toFixed(2)}
+Q3: ${result.quartiles?.q3.toFixed(2)}` : '';
 
-    const blob = new Blob([JSON.stringify(analysisReport, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+      const categorical = result.type === 'categorical' ? `
+Mode: ${result.mode}` : '';
+
+      return `${basic}${numeric}${categorical}\n`;
+    }).join('\n---\n\n');
+
+    const blob = new Blob([analysisText], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'analysis_report.json';
+    a.download = 'analysis_results.txt';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
+    window.URL.revokeObjectURL(url);
+  }, [analysisResults]);
 
-  const getTabClassName = (tab: string) => `
-    ${activeTab === tab
-      ? 'border-blue-500 text-blue-600'
-      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-    } flex items-center px-6 py-4 border-b-2 font-medium text-sm
-  `;
+  const getTabClassName = (tab: string) => {
+    const baseClasses = "flex items-center px-4 py-2 border-b-2 text-sm font-medium";
+    return activeTab === tab
+      ? `${baseClasses} border-blue-500 text-blue-600`
+      : `${baseClasses} border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300`;
+  };
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -242,6 +237,13 @@ function App() {
               <div className="border-b border-gray-200">
                 <nav className="flex -mb-px">
                   <button
+                    onClick={() => setActiveTab('dashboard')}
+                    className={getTabClassName('dashboard')}
+                  >
+                    <LayoutDashboard className="h-5 w-5 mr-2" />
+                    Dashboard
+                  </button>
+                  <button
                     onClick={() => setActiveTab('data')}
                     className={getTabClassName('data')}
                   >
@@ -270,6 +272,13 @@ function App() {
                     Edit Data
                   </button>
                   <button
+                    onClick={() => setActiveTab('curate')}
+                    className={getTabClassName('curate')}
+                  >
+                    <Wand2 className="h-5 w-5 mr-2" />
+                    Curate
+                  </button>
+                  <button
                     onClick={() => setActiveTab('sql')}
                     className={getTabClassName('sql')}
                   >
@@ -286,6 +295,13 @@ function App() {
                 </nav>
               </div>
               <div className="p-6">
+                {activeTab === 'dashboard' && (
+                  <Dashboard 
+                    data={data}
+                    columns={columns}
+                    analysisResults={analysisResults}
+                  />
+                )}
                 {activeTab === 'data' && data.length > 0 && (
                   <DataTable data={data} columns={columns} />
                 )}
@@ -297,6 +313,13 @@ function App() {
                 )}
                 {activeTab === 'edit' && (
                   <DataEditor
+                    data={data}
+                    columns={columns}
+                    onSave={handleDataSave}
+                  />
+                )}
+                {activeTab === 'curate' && (
+                  <DataCuration
                     data={data}
                     columns={columns}
                     onSave={handleDataSave}
@@ -351,5 +374,3 @@ function App() {
     </div>
   );
 }
-
-export default App;

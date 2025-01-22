@@ -23,7 +23,7 @@ export interface Filter {
   column: string;
   operator: 'equals' | 'contains' | 'greater' | 'less' | 'between';
   value: string | number;
-  value2?: string | number; 
+  value2?: string | number; // For 'between' operator
 }
 
 export interface Sort {

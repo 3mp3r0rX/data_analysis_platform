@@ -72,6 +72,7 @@ export const Notebook: React.FC = () => {
     if (cell.type !== 'code') return;
 
     try {
+      // Execute the code and capture console.log output
       const logs: string[] = [];
       const originalConsoleLog = console.log;
       console.log = (...args) => {
@@ -80,10 +81,13 @@ export const Notebook: React.FC = () => {
         ).join(' '));
       };
 
+      // Execute the code
       const result = new Function('data', cell.content)(window.data);
       
+      // Restore console.log
       console.log = originalConsoleLog;
 
+      // Update cell output
       const newCells = [...cells];
       newCells[index] = {
         ...cell,
