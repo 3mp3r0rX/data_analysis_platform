@@ -1,7 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { DataRow, Filter, Sort } from '../types';
 import { filterData, sortData } from '../utils/analysis';
-import { Filter as FilterIcon, ArrowUpDown, Download } from 'lucide-react';
+import { 
+  Filter as FilterIcon, 
+  ArrowUpDown, 
+  Download, 
+  Search,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight
+} from 'lucide-react';
 
 interface DataTableProps {
   data: DataRow[];
@@ -12,9 +22,27 @@ export const DataTable: React.FC<DataTableProps> = ({ data, columns }) => {
   const [filters, setFilters] = useState<Filter[]>([]);
   const [sort, setSort] = useState<Sort>();
   const [showFilters, setShowFilters] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  const filteredData = filterData(data, filters);
-  const sortedData = sortData(filteredData, sort);
+  const searchedData = useMemo(() => {
+    if (!searchTerm) return data;
+    return data.filter(row => 
+      Object.values(row).some(value => 
+        String(value).toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    );
+  }, [data, searchTerm]);
+
+  const filteredData = useMemo(() => filterData(searchedData, filters), [searchedData, filters]);
+  const sortedData = useMemo(() => sortData(filteredData, sort), [filteredData, sort]);
+
+  const totalPages = Math.ceil(sortedData.length / rowsPerPage);
+  const paginatedData = sortedData.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage
+  );
 
   const handleAddFilter = () => {
     setFilters([...filters, {
@@ -69,40 +97,58 @@ export const DataTable: React.FC<DataTableProps> = ({ data, columns }) => {
   };
 
   return (
-    <div>
-      <div className="mb-4 flex justify-between items-center">
-        <div className="flex space-x-2">
+    <div className="space-y-4 animate-fade-in">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="flex-1 w-full md:w-auto">
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search data..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="input pl-10 pr-4 w-full"
+            />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+        
+        <div className="flex items-center space-x-2">
           <button
             onClick={handleAddFilter}
-            className="flex items-center px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            className="btn-secondary"
           >
             <FilterIcon className="h-4 w-4 mr-2" />
             Add Filter
           </button>
           <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="px-3 py-2 text-gray-600 hover:text-gray-800"
+            onClick={exportCSV}
+            className="btn-primary"
           >
-            {showFilters ? 'Hide Filters' : 'Show Filters'}
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
           </button>
         </div>
-        <button
-          onClick={exportCSV}
-          className="flex items-center px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Export CSV
-        </button>
       </div>
 
       {showFilters && filters.length > 0 && (
-        <div className="mb-4 space-y-2">
+        <div className="space-y-2 p-4 card">
+          <h3 className="text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-3">
+            Active Filters
+          </h3>
           {filters.map((filter, index) => (
-            <div key={index} className="flex space-x-2 items-center">
+            <div key={index} className="flex flex-wrap gap-2 items-center bg-light-background dark:bg-dark-background p-3 rounded-lg">
               <select
                 value={filter.column}
                 onChange={(e) => handleFilterChange(index, 'column', e.target.value)}
-                className="border rounded px-2 py-1"
+                className="input !py-1"
               >
                 {columns.map(col => (
                   <option key={col} value={col}>{col}</option>
@@ -111,7 +157,7 @@ export const DataTable: React.FC<DataTableProps> = ({ data, columns }) => {
               <select
                 value={filter.operator}
                 onChange={(e) => handleFilterChange(index, 'operator', e.target.value)}
-                className="border rounded px-2 py-1"
+                className="input !py-1"
               >
                 <option value="equals">equals</option>
                 <option value="contains">contains</option>
@@ -123,7 +169,7 @@ export const DataTable: React.FC<DataTableProps> = ({ data, columns }) => {
                 type="text"
                 value={filter.value}
                 onChange={(e) => handleFilterChange(index, 'value', e.target.value)}
-                className="border rounded px-2 py-1"
+                className="input !py-1"
                 placeholder="Value"
               />
               {filter.operator === 'between' && (
@@ -131,56 +177,151 @@ export const DataTable: React.FC<DataTableProps> = ({ data, columns }) => {
                   type="text"
                   value={filter.value2 || ''}
                   onChange={(e) => handleFilterChange(index, 'value2', e.target.value)}
-                  className="border rounded px-2 py-1"
+                  className="input !py-1"
                   placeholder="Second Value"
                 />
               )}
               <button
                 onClick={() => handleRemoveFilter(index)}
-                className="text-red-500 hover:text-red-700"
+                className="p-1 text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                aria-label="Remove filter"
               >
-                Remove
+                <X className="h-5 w-5" />
               </button>
             </div>
           ))}
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              {columns.map((column) => (
-                <th
-                  key={column}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort(column)}
-                >
-                  <div className="flex items-center space-x-1">
-                    <span>{column}</span>
-                    <ArrowUpDown className="h-4 w-4" />
-                  </div>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {sortedData.slice(0, 100).map((row, idx) => (
-              <tr key={idx} className="hover:bg-gray-50">
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-light-border dark:divide-dark-border">
+            <thead className="bg-light-background dark:bg-dark-background">
+              <tr>
                 {columns.map((column) => (
-                  <td key={column} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {row[column]?.toString()}
-                  </td>
+                  <th
+                    key={column}
+                    onClick={() => handleSort(column)}
+                    className="group px-6 py-3 text-left text-xs font-medium text-light-text-secondary dark:text-dark-text-secondary uppercase tracking-wider cursor-pointer hover:bg-light-border/50 dark:hover:bg-dark-border/50"
+                  >
+                    <div className="flex items-center space-x-1">
+                      <span>{column}</span>
+                      <ArrowUpDown className={`
+                        h-4 w-4 transition-colors duration-200
+                        ${sort?.column === column 
+                          ? 'text-light-primary dark:text-dark-primary' 
+                          : 'text-gray-400 group-hover:text-gray-600 dark:text-gray-600 dark:group-hover:text-gray-400'
+                        }
+                      `} />
+                    </div>
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {sortedData.length > 100 && (
-          <p className="text-sm text-gray-500 mt-2 text-center">
-            Showing first 100 rows of {sortedData.length} total rows
-          </p>
-        )}
+            </thead>
+            <tbody className="bg-light-surface dark:bg-dark-surface divide-y divide-light-border dark:divide-dark-border">
+              {paginatedData.map((row, idx) => (
+                <tr 
+                  key={idx}
+                  className="hover:bg-light-background dark:hover:bg-dark-background transition-colors duration-150"
+                >
+                  {columns.map((column) => (
+                    <td key={column} className="px-6 py-4 whitespace-nowrap text-sm text-light-text-primary dark:text-dark-text-primary">
+                      {row[column]?.toString()}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="px-6 py-4 bg-light-background dark:bg-dark-background border-t border-light-border dark:border-dark-border">
+          <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div className="flex items-center gap-2">
+              <select
+                value={rowsPerPage}
+                onChange={(e) => {
+                  setRowsPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="input !py-1"
+              >
+                {[10, 25, 50, 100].map(value => (
+                  <option key={value} value={value}>
+                    {value} rows
+                  </option>
+                ))}
+              </select>
+              <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
+                Showing {(currentPage - 1) * rowsPerPage + 1} to {Math.min(currentPage * rowsPerPage, sortedData.length)} of {sortedData.length} entries
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(1)}
+                disabled={currentPage === 1}
+                className="p-1 text-light-text-secondary dark:text-dark-text-secondary disabled:opacity-50"
+              >
+                <ChevronsLeft className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className="p-1 text-light-text-secondary dark:text-dark-text-secondary disabled:opacity-50"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum = currentPage;
+                  if (currentPage < 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage > totalPages - 2) {
+                    pageNum = totalPages - (4 - i);
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  
+                  if (pageNum > 0 && pageNum <= totalPages) {
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`
+                          w-8 h-8 rounded-full text-sm font-medium transition-colors duration-200
+                          ${currentPage === pageNum
+                            ? 'bg-light-primary dark:bg-dark-primary text-white'
+                            : 'text-light-text-secondary dark:text-dark-text-secondary hover:bg-light-border dark:hover:bg-dark-border'
+                          }
+                        `}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  }
+                  return null;
+                })}
+              </div>
+
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                className="p-1 text-light-text-secondary dark:text-dark-text-secondary disabled:opacity-50"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={currentPage === totalPages}
+                className="p-1 text-light-text-secondary dark:text-dark-text-secondary disabled:opacity-50"
+              >
+                <ChevronsRight className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
