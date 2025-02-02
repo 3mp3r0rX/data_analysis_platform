@@ -7,7 +7,10 @@ export const useFileHandlers = (addNotification: (message: string, type?: "succe
   const [data, setData] = useState<DataRow[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
   const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>([]);
+  const [sqlFiles, setSqlFiles] = useState<{ id: string; name: string; content: string }[]>([]);
+  const [sqlQuery, setSqlQuery] = useState<string>('');
 
+  // Handle CSV file upload
   const handleFileUpload = useCallback((file: File) => {
     parse(file, {
       header: true,
@@ -17,25 +20,44 @@ export const useFileHandlers = (addNotification: (message: string, type?: "succe
         if (parsedData.length > 0) {
           setData(parsedData);
           setColumns(Object.keys(parsedData[0]));
-          const analysis = Object.keys(parsedData[0]).map(column => 
-            analyzeColumn(parsedData, column)
-          );
-          setAnalysisResults(analysis);
+          setAnalysisResults(Object.keys(parsedData[0]).map(column => analyzeColumn(parsedData, column)));
+          addNotification(`Successfully loaded ${parsedData.length} rows`, "success");
         }
       },
       error: (error) => {
         console.error('Error parsing CSV:', error);
+        addNotification("Error parsing CSV file.", "error");
       }
     });
-  }, []);
+  }, [addNotification]);
+
+  // Handle SQL file upload
+  const handleSqlFileUpload = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      setSqlFiles(prevFiles => [...prevFiles, { id: Date.now().toString(), name: file.name, content }]);
+      addNotification(`SQL file "${file.name}" uploaded successfully`, "success");
+    };
+    reader.readAsText(file);
+  }, [addNotification]);
+
+  // Handle SQL file delete
+  const handleSqlFileDelete = useCallback((id: string) => {
+    setSqlFiles(prevFiles => prevFiles.filter(file => file.id !== id));
+    addNotification("SQL file deleted successfully", "info");
+  }, [addNotification]);
+
+  // Execute SQL query from uploaded file
+  const handleSqlFileExecute = useCallback((content: string) => {
+    setSqlQuery(content);
+    addNotification("SQL query set for execution", "info");
+  }, [addNotification]);
 
   const handleDataSave = useCallback((newData: DataRow[]) => {
     setData(newData);
     if (newData.length > 0) {
-      const analysis = Object.keys(newData[0]).map(column => 
-        analyzeColumn(newData, column)
-      );
-      setAnalysisResults(analysis);
+      setAnalysisResults(Object.keys(newData[0]).map(column => analyzeColumn(newData, column)));
     }
   }, []);
 
@@ -43,10 +65,16 @@ export const useFileHandlers = (addNotification: (message: string, type?: "succe
     data,
     columns,
     analysisResults,
+    sqlFiles,
+    sqlQuery,
     handleFileUpload,
+    handleSqlFileUpload,
+    handleSqlFileDelete,
+    handleSqlFileExecute, // ✅ Now returned
     handleDataSave,
     setData,
     setColumns,
-    setAnalysisResults
+    setAnalysisResults,
+    setSqlQuery
   };
 };

@@ -2,6 +2,8 @@ export interface DataRow {
   [key: string]: string | number;
 }
 
+
+
 export interface AnalysisResult {
   columnName: string;
   mean?: number;

@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react';
+import initSqlJs from 'sql.js';
 
-
-// Define types
 interface SqlFile {
   id: string;
   name: string;
@@ -10,7 +9,7 @@ interface SqlFile {
 
 interface SqliteDb {
   name: string;
-  db: any; // Replace `any` with a more specific type if available
+  db: any;
 }
 
 interface SqlResult {
@@ -20,10 +19,22 @@ interface SqlResult {
 
 const initializeSqlJs = async () => {
   try {
-    const SQL = await (await import('sql.js-httpvfs')).default({
+    // Dynamically import the package
+    const sqlJsModule = await import('sql.js-httpvfs');
+    
+    // Check if the default export contains initSqlJs
+    const SQL = sqlJsModule.default || sqlJsModule;
+    
+    if (typeof SQL.initSqlJs !== 'function') {
+      throw new Error('initSqlJs is not a function in the imported module');
+    }
+    
+    // Initialize SQL.js
+    const instance = await SQL.initSqlJs({
       locateFile: (file: string) => `https://sql.js.org/dist/1.8.0/${file}`,
     });
-    return SQL;
+
+    return instance;
   } catch (error) {
     console.error('Error initializing SQL.js:', error);
     throw error;
@@ -42,7 +53,8 @@ export const useSqlite = (
   const [isExecutingSql, setIsExecutingSql] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // Handle uploading .sql files
+  const sqliteDb = sqliteDbs.find((db) => db.name === activeDb) || null;
+
   const handleSqlFileUpload = useCallback(
     async (file: File) => {
       const reader = new FileReader();
@@ -63,15 +75,12 @@ export const useSqlite = (
     [addNotification]
   );
 
-  // Handle uploading SQLite database files
   const handleSqliteFileUpload = useCallback(
     async (file: File) => {
       setIsLoading(true);
       try {
         const SQL = await initializeSqlJs();
-        if (!SQL) throw new Error('Failed to initialize SQL.js');
         const buffer = await file.arrayBuffer();
-        if (!buffer) throw new Error('Failed to read file');
         const db = new SQL.Database(new Uint8Array(buffer));
         try {
           db.exec('SELECT 1'); // Test query to validate the database
@@ -80,12 +89,11 @@ export const useSqlite = (
         }
         const newDb: SqliteDb = { name: file.name, db };
         setSqliteDbs((prev) => [...prev, newDb]);
-        setActiveDb(file.name); // Set the newly uploaded database as active
+        setActiveDb(file.name);
         addNotification(`Successfully loaded SQLite database: ${file.name}`, 'success');
       } catch (error) {
         console.error('Error loading SQLite database:', error);
         addNotification(`Failed to load SQLite database: ${error.message}`, 'error');
-        throw error;
       } finally {
         setIsLoading(false);
       }
@@ -93,20 +101,18 @@ export const useSqlite = (
     [addNotification]
   );
 
-  // Execute SQL query on the active database
   const executeSQL = useCallback(async () => {
     if (!sqlQuery.trim()) {
       addNotification('SQL query cannot be empty.', 'error');
       return;
     }
-    const activeDatabase = sqliteDbs.find((db) => db.name === activeDb)?.db;
-    if (!activeDatabase) {
+    if (!sqliteDb) {
       addNotification('Please select a SQLite database first.', 'error');
       return;
     }
     setIsExecutingSql(true);
     try {
-      const results: SqlResult[] = activeDatabase.exec(sqlQuery);
+      const results: SqlResult[] = sqliteDb.db.exec(sqlQuery);
       setSqlOutput(JSON.stringify(results, null, 2));
       setQueryHistory((prev) => [...prev, sqlQuery]); // Save query to history
       addNotification('SQL query executed successfully.', 'success');
@@ -117,9 +123,8 @@ export const useSqlite = (
     } finally {
       setIsExecutingSql(false);
     }
-  }, [sqlQuery, activeDb, sqliteDbs, addNotification]);
+  }, [sqlQuery, sqliteDb, addNotification]);
 
-  // Delete an uploaded SQL file
   const handleSqlFileDelete = useCallback(
     (id: string) => {
       setSqlFiles((prev) => prev.filter((file) => file.id !== id));
@@ -128,34 +133,41 @@ export const useSqlite = (
     [addNotification]
   );
 
-  // Export the active SQLite database to a file
+  const handleSqlFileExecute = useCallback(
+    (content: string) => {
+      setSqlQuery(content);
+      executeSQL();
+    },
+    [executeSQL]
+  );
+
   const handleExportDatabase = useCallback(() => {
-    const activeDatabase = sqliteDbs.find((db) => db.name === activeDb);
-    if (!activeDatabase?.db) {
+    if (!sqliteDb?.db) {
       addNotification('No SQLite database to export.', 'error');
       return;
     }
     try {
-      const data = activeDatabase.db.export();
+      const data = sqliteDb.db.export();
       const blob = new Blob([data], { type: 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${activeDatabase.name}.sqlite`;
+      link.download = `${sqliteDb.name}.sqlite`;
       link.click();
       URL.revokeObjectURL(url);
-      addNotification(`Exported SQLite database: ${activeDatabase.name}`, 'success');
+      addNotification(`Exported SQLite database: ${sqliteDb.name}`, 'success');
     } catch (error) {
       console.error('Error exporting SQLite database:', error);
       addNotification(`Failed to export SQLite database: ${error.message}`, 'error');
     }
-  }, [activeDb, sqliteDbs, addNotification]);
+  }, [sqliteDb, addNotification]);
 
   return {
     sqlQuery,
     sqlOutput,
     sqlFiles,
     sqliteDbs,
+    sqliteDb,
     activeDb,
     queryHistory,
     isExecutingSql,
@@ -167,6 +179,7 @@ export const useSqlite = (
     handleSqliteFileUpload,
     executeSQL,
     handleSqlFileDelete,
+    handleSqlFileExecute,
     handleExportDatabase,
   };
 };
